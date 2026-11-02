@@ -40,7 +40,13 @@ def _cooling(scope: str) -> bool:
 def _cooldown(scope: str, seconds: float = 180) -> None:
     _COOLDOWN[scope] = time.time() + seconds
 
-PUSH2 = "https://1.push2.eastmoney.com/api/qt"
+PUSH2_HOSTS = [
+    "1.push2.eastmoney.com",
+    "82.push2.eastmoney.com",
+    "7.push2.eastmoney.com",
+    "99.push2.eastmoney.com",
+    "push2.eastmoney.com",
+]
 PUSH2HIS = "https://push2his.eastmoney.com/api/qt"
 # push2 throttles bursts by dropping connections; the bare host also returns 502
 # to some overseas IPs, so numbered mirrors are tried first.
@@ -193,11 +199,36 @@ def _params(**kwargs: Any) -> dict[str, Any]:
     return {key: value for key, value in kwargs.items() if value is not None}
 
 
+async def _push2_json(path: str, params: dict[str, Any]) -> Any:
+    """Try numbered push2 mirrors with a short overall budget."""
+    last_error: Exception | None = None
+    deadline = time.monotonic() + 4.5
+    for host in PUSH2_HOSTS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.5:
+            break
+        try:
+            payload = await asyncio.wait_for(
+                http.get_json(
+                    f"https://{host}/api/qt{path}",
+                    params=params,
+                    headers=EASTMONEY_HEADERS,
+                    retries=0,
+                ),
+                timeout=remaining,
+            )
+            if isinstance(payload, dict) and payload.get("data"):
+                return payload
+            last_error = UpstreamError(f"{host} returned empty payload")
+        except Exception as exc:
+            last_error = exc
+    raise UpstreamError(f"eastmoney push2 unavailable: {last_error}")
+
+
 async def _stock_get(secid: str, fields: str = QUOTE_FIELDS) -> dict[str, Any] | None:
-    payload = await http.get_json(
-        f"{PUSH2}/stock/get",
-        params={"secid": secid, "fields": fields, "fltt": 2, "invt": 2},
-        headers=EASTMONEY_HEADERS,
+    payload = await _push2_json(
+        "/stock/get",
+        {"secid": secid, "fields": fields, "fltt": 2, "invt": 2},
     )
     if not isinstance(payload, dict) or payload.get("rc") not in (0, None):
         return None
@@ -383,9 +414,9 @@ async def _clist_page(
     field: str = "f20",
     order: int = 1,
     page_size: int = 100,
-    host: str = "push2.eastmoney.com",
+    host: str = "1.push2.eastmoney.com",
     retries: int = 1,
-    timeout: float | None = None,
+    timeout: float | None = 3.0,
 ) -> tuple[list[dict[str, Any]], int]:
     payload = await http.get_json(
         f"https://{host}/api/qt/clist/get",
@@ -470,6 +501,7 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
             size: int = 100,
             timeout: float | None = None,
         ) -> tuple[list[dict[str, Any]], int] | None:
+            host_timeout = 3.0 if timeout is None else timeout
             async with semaphore:
                 for attempt in range(tries):
                     host = await pick_host()
@@ -480,7 +512,7 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
                             host=host,
                             page_size=size,
                             retries=0,
-                            timeout=timeout,
+                            timeout=host_timeout,
                         )
                         if rows:
                             return rows, total
@@ -492,12 +524,12 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
         probe = None
         probe_size = 100
         candidates = (
-            [(5000, 8.0), (100, 5.0)]
+            [(5000, 3.5), (100, 3.0)]
             if limit > 3000
-            else [(100, None)]
+            else [(100, 3.0)]
         )
         for size, timeout in candidates:
-            probe = await fetch(1, tries=3, size=size, timeout=timeout)
+            probe = await fetch(1, tries=1, size=size, timeout=timeout)
             if probe is not None:
                 probe_size = size
                 break
@@ -573,7 +605,7 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
         }
 
     try:
-        return await cache.get(key, ttl, factory)
+        return await cache.get_swr(key, ttl, factory, max_stale=6 * 3600)
     except UpstreamError as exc:
         logger.warning("eastmoney universe unavailable (%s); using fallback", exc)
         stale = await _stale_universe_snapshot(limit)
@@ -602,6 +634,49 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
             "source": "nasdaq_screener",
             "updated_at": datetime.now(ET).isoformat(),
         }
+
+
+async def screener_universe(limit: int = 14000) -> dict[str, Any]:
+    """Full-market snapshot with Tencent valuation enrichment when Eastmoney is blocked."""
+    base = await universe(limit)
+    if base.get("source") == "eastmoney" and base.get("items"):
+        return base
+
+    key = f"universe-enriched:v1:{limit}"
+
+    async def factory() -> dict[str, Any]:
+        items = [dict(item) for item in (base.get("items") or [])]
+        top = [item for item in items[:6000] if item.get("symbol")]
+        quotes = await tencent_data.batch_quotes([item["symbol"] for item in top])
+        by_symbol = {item["symbol"]: item for item in quotes}
+        fields = (
+            "pe",
+            "pb",
+            "dividend_yield",
+            "chg_60d",
+            "chg_ytd",
+            "market_cap",
+            "price",
+            "change",
+            "change_pct",
+            "volume",
+            "amount",
+        )
+        for item in items:
+            quote = by_symbol.get(item.get("symbol"))
+            if not quote:
+                continue
+            for field in fields:
+                if item.get(field) is None and quote.get(field) is not None:
+                    item[field] = quote[field]
+        return {
+            **base,
+            "items": items,
+            "enriched": "tencent",
+            "enriched_count": len(by_symbol),
+        }
+
+    return await cache.get_swr(key, 20 * 60, factory, persist=False, max_stale=6 * 3600)
 
 
 async def movers() -> dict[str, list[dict[str, Any]]]:
@@ -649,7 +724,7 @@ async def movers() -> dict[str, list[dict[str, Any]]]:
             return await from_snapshot()
         return result
 
-    return await cache.get("movers:v3", 120, factory)
+    return await cache.get_swr("movers:v3", 120, factory, max_stale=1800)
 
 
 async def sector_performance() -> list[dict[str, Any]]:
@@ -657,15 +732,14 @@ async def sector_performance() -> list[dict[str, Any]]:
         mapping = {item["symbol"]: item for item in SECTOR_ETFS}
         if not _cooling("ulist"):
             try:
-                payload = await http.get_json(
-                    f"{PUSH2}/ulist.np/get",
-                    params={
+                payload = await _push2_json(
+                    "/ulist.np/get",
+                    {
                         "fltt": 2,
                         "invt": 2,
                         "fields": "f2,f3,f4,f6,f12,f13,f14,f24,f25",
                         "secids": ",".join(item["secid"] for item in SECTOR_ETFS),
                     },
-                    headers=EASTMONEY_HEADERS,
                 )
                 rows = (((payload or {}).get("data") or {}).get("diff") or []) if isinstance(payload, dict) else []
                 result = []
@@ -719,7 +793,7 @@ async def sector_performance() -> list[dict[str, Any]]:
         result.sort(key=lambda item: item.get("change_pct") or 0, reverse=True)
         return result
 
-    return await cache.get("sectors:v3", 300, factory)
+    return await cache.get_swr("sectors:v3", 300, factory, max_stale=1800)
 
 
 async def indices() -> list[dict[str, Any]]:
@@ -728,15 +802,14 @@ async def indices() -> list[dict[str, Any]]:
         order = {item["symbol"]: idx for idx, item in enumerate(INDEX_CARDS)}
         if not _cooling("ulist"):
             try:
-                payload = await http.get_json(
-                    f"{PUSH2}/ulist.np/get",
-                    params={
+                payload = await _push2_json(
+                    "/ulist.np/get",
+                    {
                         "fltt": 2,
                         "invt": 2,
                         "fields": "f2,f3,f4,f6,f12,f13,f14",
                         "secids": ",".join(item["secid"] for item in INDEX_CARDS),
                     },
-                    headers=EASTMONEY_HEADERS,
                 )
                 rows = (((payload or {}).get("data") or {}).get("diff") or []) if isinstance(payload, dict) else []
                 by_em_symbol = {
@@ -787,7 +860,7 @@ async def indices() -> list[dict[str, Any]]:
         result.sort(key=lambda item: order.get(item["symbol"], 99))
         return result
 
-    return await cache.get("indices:v3", 45, factory)
+    return await cache.get_swr("indices:v3", 45, factory, max_stale=600)
 
 
 async def trends(secid: str) -> dict[str, list[Any]]:
@@ -873,7 +946,7 @@ async def index_trends() -> dict[str, list[float]]:
 
         return dict(await asyncio.gather(*(fill(item) for item in INDEX_CARDS)))
 
-    return await cache.get("index-trends:v7", 120, factory)
+    return await cache.get_swr("index-trends:v7", 120, factory, max_stale=3600)
 
 
 FALLBACK_DAYS = {
@@ -1361,7 +1434,7 @@ async def fast_news(limit: int = 24) -> list[dict[str, Any]]:
             )
         return results[:limit]
 
-    return await cache.get(f"fast-news:v3:{limit}", 120, factory)
+    return await cache.get_swr(f"fast-news:v3:{limit}", 120, factory, max_stale=1800)
 
 
 def market_status() -> dict[str, Any]:

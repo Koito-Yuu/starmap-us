@@ -34,6 +34,8 @@ class JsonCache:
         self._memory: dict[str, tuple[float, Any]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._files: dict[str, Path] = {}
+        self._refreshing: set[str] = set()
+        self._tasks: set[asyncio.Task] = set()
 
     def _path(self, key: str) -> Path:
         path = self._files.get(key)
@@ -99,6 +101,71 @@ class JsonCache:
             if persist:
                 await asyncio.to_thread(self._write_disk, key, value)
             return value
+
+    async def get_swr(
+        self,
+        key: str,
+        ttl: float,
+        factory: Callable[[], Awaitable[T]],
+        *,
+        persist: bool = True,
+        max_stale: float = 6 * 3600,
+    ) -> T:
+        """Serve cached data immediately and refresh in the background when expired."""
+        if not self.enabled:
+            return await factory()
+
+        now = time.time()
+        entry = self._memory.get(key)
+        if entry:
+            expires, value = entry
+            if expires > now:
+                return value
+            if now - expires <= max_stale:
+                self._schedule_refresh(key, ttl, factory, persist)
+                return value
+
+        saved_at: float | None = None
+        stale: Any = None
+        if persist:
+            saved_at, stale = await asyncio.to_thread(self._read_disk, key)
+        if stale is not None and saved_at is not None and now - saved_at <= max_stale:
+            self._memory[key] = (saved_at + ttl, stale)
+            self._schedule_refresh(key, ttl, factory, persist)
+            return stale
+
+        return await self.get(key, ttl, factory, persist=persist, allow_stale=True)
+
+    def _schedule_refresh(
+        self,
+        key: str,
+        ttl: float,
+        factory: Callable[[], Awaitable[T]],
+        persist: bool,
+    ) -> None:
+        if key in self._refreshing:
+            return
+        self._refreshing.add(key)
+        task = asyncio.create_task(self._refresh(key, ttl, factory, persist))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _refresh(
+        self,
+        key: str,
+        ttl: float,
+        factory: Callable[[], Awaitable[T]],
+        persist: bool,
+    ) -> None:
+        try:
+            value = await factory()
+            self._memory[key] = (time.time() + ttl, value)
+            if persist:
+                await asyncio.to_thread(self._write_disk, key, value)
+        except Exception:
+            logger.warning("background refresh failed for %s; keeping stale cache", key, exc_info=True)
+        finally:
+            self._refreshing.discard(key)
 
     def _read_disk(self, key: str) -> tuple[float | None, Any]:
         path = self._path(key)

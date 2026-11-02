@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -60,6 +61,8 @@ def _normalize(fields: list[str], symbol: str, name_override: str | None = None)
         "pe": _num(fields[39]) if len(fields) > 39 else None,
         "pb": _num(fields[51]) if len(fields) > 51 else None,
         "dividend_yield": _num(fields[52]) if len(fields) > 52 else None,
+        "chg_60d": _num(fields[61]) if len(fields) > 61 else None,
+        "chg_ytd": _num(fields[54]) if len(fields) > 54 else None,
         "market_cap": mcap_raw * 1e8 if mcap_raw and mcap_raw > 0 else None,
         "week52_high": _num(fields[48]) if len(fields) > 48 else None,
         "week52_low": _num(fields[49]) if len(fields) > 49 else None,
@@ -114,6 +117,26 @@ async def quote(symbol: str) -> dict[str, Any]:
     if not items:
         raise UpstreamError(f"tencent quote unavailable for {symbol}")
     return items[0]
+
+
+async def batch_quotes(symbols: list[str], *, concurrency: int = 8) -> list[dict[str, Any]]:
+    """Fetch many symbols in parallel batches; failures are skipped."""
+    wanted = [item.strip().upper() for item in symbols if item.strip()]
+    if not wanted:
+        return []
+    batches = [wanted[index : index + 50] for index in range(0, len(wanted), 50)]
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def one(batch: list[str]) -> list[dict[str, Any]]:
+        async with semaphore:
+            try:
+                return await quotes(batch)
+            except Exception as exc:
+                logger.info("tencent batch %s failed: %s", batch[:3], exc)
+                return []
+
+    groups = await asyncio.gather(*(one(batch) for batch in batches))
+    return [item for group in groups for item in group]
 
 
 async def index_quotes() -> list[dict[str, Any]]:

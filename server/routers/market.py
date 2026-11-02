@@ -38,7 +38,102 @@ async def safe(
 
 
 _OVERVIEW_CACHE: dict[int, tuple[float, dict[str, Any]]] = {}
-_OVERVIEW_TTL = 20.0
+_OVERVIEW_TTL = 30.0
+_OVERVIEW_REFRESHING: set[int] = set()
+_OVERVIEW_TASKS: set[asyncio.Task] = set()
+_OVERVIEW_LOCK = asyncio.Lock()
+
+
+async def _build_overview(universe_limit: int) -> dict[str, Any]:
+    warnings: list[str] = []
+    indices, sparklines, sectors, universe_data, movers, news, earnings, macro = await asyncio.gather(
+        safe(eastmoney.indices(), [], "指数行情", warnings, timeout=6),
+        safe(eastmoney.index_trends(), {}, "指数走势", warnings, timeout=9),
+        safe(eastmoney.sector_performance(), [], "板块表现", warnings, timeout=7),
+        safe(eastmoney.universe(universe_limit), {"items": []}, "全市场快照", warnings, timeout=10),
+        safe(eastmoney.movers(), {"gainers": [], "losers": [], "active": []}, "异动榜", warnings, timeout=7),
+        safe(eastmoney.fast_news(20), [], "市场快讯", warnings, timeout=5),
+        safe(nasdaq.earnings_calendar(7), [], "财报日历", warnings, timeout=6),
+        safe(_macro_cards(warnings), [], "宏观快照", warnings, timeout=8),
+    )
+    items = universe_data.get("items") or []
+    heatmap = [
+        {
+            "symbol": item["symbol"],
+            "name": item["name"],
+            "change_pct": item.get("change_pct"),
+            "market_cap": item.get("market_cap"),
+            "industry": item.get("industry"),
+        }
+        for item in items
+        if not item.get("is_etf") and item.get("market_cap") and item.get("change_pct") is not None
+    ][:180]
+    return {
+        "as_of": datetime.now(ET).isoformat(timespec="seconds"),
+        "status": eastmoney.market_status(),
+        "indices": indices,
+        "sparklines": sparklines,
+        "sectors": sectors,
+        "breadth": _breadth(items),
+        "heatmap": heatmap,
+        "movers": movers,
+        "news": news,
+        "earnings": earnings,
+        "macro": macro,
+        "universe": {
+            "sample": len(items),
+            "total": universe_data.get("total_market"),
+            "source": universe_data.get("source"),
+            "updated_at": universe_data.get("updated_at"),
+        },
+        "warnings": warnings,
+    }
+
+
+def _store_overview(limit: int, payload: dict[str, Any]) -> None:
+    _OVERVIEW_CACHE[limit] = (time.monotonic() + _OVERVIEW_TTL, payload)
+
+
+def _schedule_overview_refresh(limit: int) -> None:
+    if limit in _OVERVIEW_REFRESHING:
+        return
+    _OVERVIEW_REFRESHING.add(limit)
+
+    async def refresh() -> None:
+        try:
+            async with _OVERVIEW_LOCK:
+                cached = _OVERVIEW_CACHE.get(limit)
+                if cached and cached[0] > time.monotonic():
+                    return
+                _store_overview(limit, await _build_overview(limit))
+        except Exception:
+            logger.warning("overview background refresh failed", exc_info=True)
+        finally:
+            _OVERVIEW_REFRESHING.discard(limit)
+
+    task = asyncio.create_task(refresh())
+    _OVERVIEW_TASKS.add(task)
+    task.add_done_callback(_OVERVIEW_TASKS.discard)
+
+
+@router.get("/market/overview")
+async def overview(universe_limit: int = Query(3000, ge=300, le=4000)) -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _OVERVIEW_CACHE.get(universe_limit)
+    if cached:
+        expires, payload = cached
+        if expires > now:
+            return payload
+        if now - expires <= 300:
+            _schedule_overview_refresh(universe_limit)
+            return payload
+    async with _OVERVIEW_LOCK:
+        cached = _OVERVIEW_CACHE.get(universe_limit)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        payload = await _build_overview(universe_limit)
+        _store_overview(universe_limit, payload)
+        return payload
 
 
 def _breadth(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -120,59 +215,6 @@ async def health() -> dict[str, Any]:
 @router.get("/market/status")
 async def status() -> dict[str, Any]:
     return eastmoney.market_status()
-
-
-@router.get("/market/overview")
-async def overview(universe_limit: int = Query(3000, ge=300, le=4000)) -> dict[str, Any]:
-    cached = _OVERVIEW_CACHE.get(universe_limit)
-    if cached and cached[0] > time.monotonic():
-        return cached[1]
-
-    warnings: list[str] = []
-    indices, sparklines, sectors, universe_data, movers, news, earnings, macro = await asyncio.gather(
-        safe(eastmoney.indices(), [], "指数行情", warnings, timeout=6),
-        safe(eastmoney.index_trends(), {}, "指数走势", warnings, timeout=9),
-        safe(eastmoney.sector_performance(), [], "板块表现", warnings, timeout=7),
-        safe(eastmoney.universe(universe_limit), {"items": []}, "全市场快照", warnings, timeout=10),
-        safe(eastmoney.movers(), {"gainers": [], "losers": [], "active": []}, "异动榜", warnings, timeout=7),
-        safe(eastmoney.fast_news(20), [], "市场快讯", warnings, timeout=5),
-        safe(nasdaq.earnings_calendar(7), [], "财报日历", warnings, timeout=6),
-        safe(_macro_cards(warnings), [], "宏观快照", warnings, timeout=8),
-    )
-    items = universe_data.get("items") or []
-    heatmap = [
-        {
-            "symbol": item["symbol"],
-            "name": item["name"],
-            "change_pct": item.get("change_pct"),
-            "market_cap": item.get("market_cap"),
-            "industry": item.get("industry"),
-        }
-        for item in items
-        if not item.get("is_etf") and item.get("market_cap") and item.get("change_pct") is not None
-    ][:180]
-    payload = {
-        "as_of": datetime.now(ET).isoformat(timespec="seconds"),
-        "status": eastmoney.market_status(),
-        "indices": indices,
-        "sparklines": sparklines,
-        "sectors": sectors,
-        "breadth": _breadth(items),
-        "heatmap": heatmap,
-        "movers": movers,
-        "news": news,
-        "earnings": earnings,
-        "macro": macro,
-        "universe": {
-            "sample": len(items),
-            "total": universe_data.get("total_market"),
-            "source": universe_data.get("source"),
-            "updated_at": universe_data.get("updated_at"),
-        },
-        "warnings": warnings,
-    }
-    _OVERVIEW_CACHE[universe_limit] = (time.monotonic() + _OVERVIEW_TTL, payload)
-    return payload
 
 
 @router.get("/market/earnings")

@@ -31,10 +31,15 @@ mimetypes.add_type("font/woff2", ".woff2")
 async def lifespan(app: FastAPI):
     async def warm() -> None:
         try:
-            await eastmoney.universe(3000)
-            logger.info("全市场快照预热完成")
+            await market.overview(universe_limit=3000)
+            logger.info("市场总览预热完成")
         except Exception as exc:
-            logger.warning("全市场快照预热失败：%s", exc)
+            logger.warning("市场总览预热失败：%s", exc)
+        try:
+            await eastmoney.screener_universe(14000)
+            logger.info("选股快照预热完成")
+        except Exception as exc:
+            logger.warning("选股快照预热失败：%s", exc)
 
     task = asyncio.create_task(warm())
     logger.info("星图启动：http://127.0.0.1:8000")

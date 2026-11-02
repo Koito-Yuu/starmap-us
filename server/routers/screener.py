@@ -56,7 +56,7 @@ PRESETS: list[dict[str, Any]] = [
 
 @router.get("/universe")
 async def universe(limit: int = Query(14000, ge=300, le=15000)) -> dict[str, Any]:
-    payload = await eastmoney.universe(limit)
+    payload = await eastmoney.screener_universe(limit)
     return payload
 
 

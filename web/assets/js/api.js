@@ -12,9 +12,9 @@ const GET_CACHE_LIMIT = 32;
 function cacheTtl(path) {
   const pathname = String(path || '').split('?')[0];
   if (pathname === '/api/screener/presets') return 10 * 60 * 1000;
-  if (pathname === '/api/macro/overview') return 120 * 1000;
-  if (pathname === '/api/market/overview') return 20 * 1000;
-  if (pathname === '/api/screener/universe') return 120 * 1000;
+  if (pathname === '/api/macro/overview') return 150 * 1000;
+  if (pathname === '/api/market/overview') return 45 * 1000;
+  if (pathname === '/api/screener/universe') return 300 * 1000;
   if (pathname === '/api/market/earnings') return 60 * 1000;
   if (pathname === '/api/quotes') return 5 * 1000;
   if (pathname === '/api/watchlist/analyze') return 30 * 1000;

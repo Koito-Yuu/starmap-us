@@ -131,6 +131,8 @@ export async function mount(root, params, ctx) {
 
   state.items = (data.items || []).filter((item) => !item.is_etf);
   state.source = data.source || 'eastmoney';
+  state.enriched = data.enriched || '';
+  state.enrichedCount = data.enriched_count || 0;
   state.totalMarket = data.total_market || state.items.length;
   state.updatedAt = data.updated_at || '';
   state.hasFundamentals = state.items.some(
@@ -142,7 +144,7 @@ export async function mount(root, params, ctx) {
     .sort((a, b) => b.count - a.count);
 
   const coverage = state.source === 'nasdaq_screener'
-    ? `Nasdaq 备用快照 ${fmtInt(state.totalMarket)} 只标的 · 已载入 ${fmtInt(state.items.length)} 只可筛选标的`
+    ? `Nasdaq 备用快照 ${fmtInt(state.totalMarket)} 只标的 · 已载入 ${fmtInt(state.items.length)} 只可筛选标的${state.enriched === 'tencent' ? ` · 腾讯补全 ${fmtInt(state.enrichedCount)} 只估值与动量` : ''}`
     : `全市场 ${fmtInt(state.totalMarket)} 只美股 · 已载入 ${fmtInt(state.items.length)} 只可筛选标的`;
   root.innerHTML = `
     <section class="view">
@@ -153,7 +155,7 @@ export async function mount(root, params, ctx) {
         actions: `${asOfBadge(state.updatedAt)}<span class="pill info">${esc(sourceLabel(state.source))}</span>`,
       })}
       ${
-        state.source === 'eastmoney+nasdaq'
+        state.source === 'eastmoney+nasdaq' && state.enriched !== 'tencent'
           ? ui.warnBanner('东方财富快照暂不可用：前 3,000 只沿用最近缓存，其余来自 Nasdaq 补充；估值与动量字段覆盖不完整。上游恢复后重新加载页面将抓取完整快照。')
           : state.hasFundamentals
             ? ''
