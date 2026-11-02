@@ -1,0 +1,10 @@
+.venv/
+.cache/
+.trae-html-share-packages/
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
