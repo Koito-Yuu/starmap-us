@@ -40,21 +40,21 @@ def _cooling(scope: str) -> bool:
 def _cooldown(scope: str, seconds: float = 180) -> None:
     _COOLDOWN[scope] = time.time() + seconds
 
-PUSH2 = "https://push2.eastmoney.com/api/qt"
+PUSH2 = "https://1.push2.eastmoney.com/api/qt"
 PUSH2HIS = "https://push2his.eastmoney.com/api/qt"
-# push2 throttles bursts by dropping connections; spreading pages across the
-# numbered mirrors keeps the full-market snapshot from silently losing pages.
+# push2 throttles bursts by dropping connections; the bare host also returns 502
+# to some overseas IPs, so numbered mirrors are tried first.
 CLIST_HOSTS = [
-    "push2.eastmoney.com",
     "1.push2.eastmoney.com",
-    "2.push2.eastmoney.com",
+    "82.push2.eastmoney.com",
     "7.push2.eastmoney.com",
+    "99.push2.eastmoney.com",
+    "2.push2.eastmoney.com",
     "12.push2.eastmoney.com",
     "23.push2.eastmoney.com",
     "44.push2.eastmoney.com",
     "63.push2.eastmoney.com",
-    "82.push2.eastmoney.com",
-    "99.push2.eastmoney.com",
+    "push2.eastmoney.com",
 ]
 DATACENTER = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 SEARCH_URL = "https://searchadapter.eastmoney.com/api/suggest/get"
@@ -497,7 +497,7 @@ async def universe(limit: int = 3000) -> dict[str, Any]:
             else [(100, None)]
         )
         for size, timeout in candidates:
-            probe = await fetch(1, tries=1, size=size, timeout=timeout)
+            probe = await fetch(1, tries=3, size=size, timeout=timeout)
             if probe is not None:
                 probe_size = size
                 break
