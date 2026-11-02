@@ -820,11 +820,12 @@ async def trends(secid: str) -> dict[str, list[Any]]:
 
 async def index_trends() -> dict[str, list[float]]:
     proxy_map = {"SPX": "SPY", "COMP": "QQQ", "DJIA": "DIA", "IWM": "IWM"}
+    etf_secids = {"SPX": "107.SPY", "COMP": "107.QQQ", "DJIA": "107.DIA", "IWM": "107.IWM"}
 
     async def factory() -> dict[str, list[float]]:
         async def one(item: dict[str, Any]) -> tuple[str, list[float]]:
             try:
-                data = await asyncio.wait_for(trends(item["secid"]), timeout=2.5)
+                data = await asyncio.wait_for(trends(item["secid"]), timeout=2.0)
                 return item["symbol"], data["c"][-90:]
             except Exception as exc:
                 logger.info("trend failed for %s: %s", item["symbol"], exc)
@@ -832,23 +833,60 @@ async def index_trends() -> dict[str, list[float]]:
 
         pairs = dict(await asyncio.gather(*(one(item) for item in INDEX_CARDS)))
 
-        async def proxy(symbol: str) -> tuple[str, list[float]]:
+        async def daily(secid: str) -> list[float]:
+            try:
+                payload = await asyncio.wait_for(
+                    http.get_json(
+                        f"{PUSH2HIS}/stock/kline/get",
+                        params={
+                            "secid": secid,
+                            "klt": 101,
+                            "fqt": 1,
+                            "lmt": 60,
+                            "end": "20500101",
+                            "fields1": "f1,f2,f3,f4,f5,f6",
+                            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+                        },
+                        headers=EASTMONEY_HEADERS,
+                    ),
+                    timeout=4.0,
+                )
+                lines = ((payload or {}).get("data") or {}).get("klines") or []
+                closes: list[float] = []
+                for line in lines:
+                    parts = str(line).split(",")
+                    if len(parts) < 3:
+                        continue
+                    close = _f(parts[2])
+                    if close is not None:
+                        closes.append(close)
+                return closes[-60:]
+            except Exception as exc:
+                logger.info("index kline failed for %s: %s", secid, exc)
+                return []
+
+        async def proxy(symbol: str) -> list[float]:
             try:
                 bars = await asyncio.wait_for(
                     nasdaq_data.historical(proxy_map[symbol], 80), timeout=4.0
                 )
-                return symbol, [float(bar["c"]) for bar in bars][-60:]
+                return [float(bar["c"]) for bar in bars][-60:]
             except Exception as exc:
                 logger.info("index proxy failed for %s: %s", symbol, exc)
-                return symbol, []
+                return []
 
-        missing = [item["symbol"] for item in INDEX_CARDS if not pairs.get(item["symbol"])]
+        async def fill(item: dict[str, Any]) -> tuple[str, list[float]]:
+            daily_values, proxy_values = await asyncio.gather(
+                daily(etf_secids[item["symbol"]]), proxy(item["symbol"])
+            )
+            return item["symbol"], daily_values or proxy_values
+
+        missing = [item for item in INDEX_CARDS if not pairs.get(item["symbol"])]
         if missing:
-            filled = await asyncio.gather(*(proxy(symbol) for symbol in missing))
-            pairs.update(dict(filled))
+            pairs.update(dict(await asyncio.gather(*(fill(item) for item in missing))))
         return pairs
 
-    return await cache.get("index-trends:v4", 120, factory)
+    return await cache.get("index-trends:v6", 120, factory)
 
 
 FALLBACK_DAYS = {
