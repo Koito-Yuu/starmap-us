@@ -820,7 +820,7 @@ async def trends(secid: str) -> dict[str, list[Any]]:
 
 async def index_trends() -> dict[str, list[float]]:
     proxy_map = {"SPX": "SPY", "COMP": "QQQ", "DJIA": "DIA", "IWM": "IWM"}
-    etf_secids = {"SPX": "107.SPY", "COMP": "107.QQQ", "DJIA": "107.DIA", "IWM": "107.IWM"}
+    etf_secids = {"SPX": "107.SPY", "COMP": "105.QQQ", "DJIA": "107.DIA", "IWM": "107.IWM"}
 
     async def factory() -> dict[str, list[float]]:
         async def daily(secid: str) -> list[float]:
