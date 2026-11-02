@@ -822,33 +822,33 @@ async def index_trends() -> dict[str, list[float]]:
     proxy_map = {"SPX": "SPY", "COMP": "QQQ", "DJIA": "DIA", "IWM": "IWM"}
 
     async def factory() -> dict[str, list[float]]:
-        semaphore = asyncio.Semaphore(4)
-
         async def one(item: dict[str, Any]) -> tuple[str, list[float]]:
-            async with semaphore:
-                try:
-                    data = await trends(item["secid"])
-                    return item["symbol"], data["c"][-90:]
-                except Exception as exc:
-                    logger.info("trend failed for %s: %s", item["symbol"], exc)
-                    return item["symbol"], []
+            try:
+                data = await asyncio.wait_for(trends(item["secid"]), timeout=2.5)
+                return item["symbol"], data["c"][-90:]
+            except Exception as exc:
+                logger.info("trend failed for %s: %s", item["symbol"], exc)
+                return item["symbol"], []
 
         pairs = dict(await asyncio.gather(*(one(item) for item in INDEX_CARDS)))
-        if not any(pairs.values()):
-            async def proxy(symbol: str, etf: str) -> tuple[str, list[float]]:
-                try:
-                    bars = await nasdaq_data.historical(etf, 80)
-                    return symbol, [float(bar["c"]) for bar in bars][-60:]
-                except Exception as exc:
-                    logger.info("index proxy failed for %s: %s", symbol, exc)
-                    return symbol, []
 
-            pairs = dict(
-                await asyncio.gather(*(proxy(symbol, etf) for symbol, etf in proxy_map.items()))
-            )
+        async def proxy(symbol: str) -> tuple[str, list[float]]:
+            try:
+                bars = await asyncio.wait_for(
+                    nasdaq_data.historical(proxy_map[symbol], 80), timeout=4.0
+                )
+                return symbol, [float(bar["c"]) for bar in bars][-60:]
+            except Exception as exc:
+                logger.info("index proxy failed for %s: %s", symbol, exc)
+                return symbol, []
+
+        missing = [item["symbol"] for item in INDEX_CARDS if not pairs.get(item["symbol"])]
+        if missing:
+            filled = await asyncio.gather(*(proxy(symbol) for symbol in missing))
+            pairs.update(dict(filled))
         return pairs
 
-    return await cache.get("index-trends:v3", 120, factory)
+    return await cache.get("index-trends:v4", 120, factory)
 
 
 FALLBACK_DAYS = {

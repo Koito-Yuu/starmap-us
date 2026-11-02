@@ -1639,6 +1639,7 @@ a.news-title:hover { color: var(--accent); }
 
 .data-table th:first-child, .data-table td:first-child { text-align: left; padding-left: 18px; }
 .data-table th:last-child, .data-table td:last-child { padding-right: 18px; }
+.data-table th.text-left { text-align: left; }
 .data-table th.sortable { cursor: pointer; }
 .data-table th.sortable:hover { color: var(--text-dim); }
 .data-table th .sort-arrow { margin-left: 3px; color: var(--accent); font-size: var(--fs-micro); }

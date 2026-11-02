@@ -131,7 +131,7 @@ async def overview(universe_limit: int = Query(3000, ge=300, le=4000)) -> dict[s
     warnings: list[str] = []
     indices, sparklines, sectors, universe_data, movers, news, earnings, macro = await asyncio.gather(
         safe(eastmoney.indices(), [], "指数行情", warnings, timeout=6),
-        safe(eastmoney.index_trends(), {}, "指数走势", warnings, timeout=7),
+        safe(eastmoney.index_trends(), {}, "指数走势", warnings, timeout=9),
         safe(eastmoney.sector_performance(), [], "板块表现", warnings, timeout=7),
         safe(eastmoney.universe(universe_limit), {"items": []}, "全市场快照", warnings, timeout=10),
         safe(eastmoney.movers(), {"gainers": [], "losers": [], "active": []}, "异动榜", warnings, timeout=7),

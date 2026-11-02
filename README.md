@@ -2,8 +2,6 @@
 
 星图是一个本地运行的中文美股研究工作台。后端使用 FastAPI 聚合公开行情、SEC EDGAR、FRED、纳斯达克与美联储官方数据；前端使用原生 ES Modules 与 ECharts，无构建步骤。覆盖市场全景、个股研究、自选研究、智能选股、多股对比、组合回测、宏观雷达与基金档案。
 
-它面向研究与复盘，而不是实盘交易：**不保存交易流水、不提供自动下单、不预测收益，也不生成原文之外的事实**。
-
 ## 目录
 
 - [快速开始](#快速开始)
@@ -19,7 +17,6 @@
 - [配置](#配置)
 - [已知限制](#已知限制)
 - [研究参考](#研究参考)
-- [免责声明](#免责声明)
 
 ---
 
@@ -63,7 +60,7 @@ python -m venv .venv
 - **来源可追溯**：行情、财务、宏观和文本数据分别标注来源与 as-of；降级数据不伪装成主源。
 - **不补造数据**：缺失价格、成交量、指标窗口或基金份额类别时留空，不用代理数据填补。
 - **描述而非预测**：技术指标、宏观象限、衰退观察和风险分解都是描述性工具，不输出收益承诺或伪概率。
-- **本地优先**：自选、组合与图表偏好保存在浏览器 localStorage；没有账户、交易与持仓上传。
+- **本地优先**：自选、组合与图表偏好保存在浏览器 localStorage。
 
 ---
 
@@ -327,7 +324,7 @@ us/
 
 ## 研究参考
 
-界面与指标的取舍参考了以下公开项目与资料，均为思想与交互层面的借鉴，未复制第三方源码：
+界面与指标的取舍参考了以下公开项目与资料：
 
 **技术分析 / 图表**
 
@@ -364,9 +361,3 @@ us/
 - [芝加哥联储 CFNAI](https://www.chicagofed.org/research/data/cfnai/current-data) / [NFCI](https://www.chicagofed.org/research/data/nfci/current-data)
 - [ribromeu/US-Yield-Curve-Macro-Dashboard](https://github.com/ribromeu/US-Yield-Curve-Macro-Dashboard)
 - [FRED API](https://fred.stlouisfed.org/docs/api/fred/) / [ALFRED](https://fred.stlouisfed.org/docs/api/fred/series_observations.html)
-
----
-
-## 免责声明
-
-本项目仅用于技术学习与研究，不构成任何投资建议。数据版权归各上游来源所有，请遵守其服务条款，勿用于商业用途或高频抓取。据此做出的任何决策与损失，作者不承担责任。

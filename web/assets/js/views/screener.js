@@ -249,8 +249,8 @@ export async function mount(root, params, ctx) {
             <thead>
               <tr>
                 <th style="width:34px"></th>
-                <th class="sortable" data-sort="symbol">代码${sortArrow('symbol', state)}</th>
-                <th>行业</th>
+                <th class="sortable text-left" data-sort="symbol">代码${sortArrow('symbol', state)}</th>
+                <th class="text-left">行业</th>
                 <th class="sortable" data-sort="price">价格${sortArrow('price', state)}</th>
                 <th class="sortable" data-sort="change_pct">涨跌幅${sortArrow('change_pct', state)}</th>
                 <th class="sortable" data-sort="market_cap">总市值${sortArrow('market_cap', state)}</th>

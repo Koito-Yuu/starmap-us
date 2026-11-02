@@ -71,10 +71,25 @@ function portfolioId() {
 export const store = {
   settings() {
     const value = readJSON(SETTINGS_KEY, {});
+    let chart = value.chart && typeof value.chart === 'object' ? value.chart : {};
+    if (chart.defaults !== 2) {
+      chart = {
+        ...chart,
+        defaults: 2,
+        ma: false,
+        macd: false,
+        rsi: false,
+        levels: false,
+        channel: 'none',
+        trend: 'none',
+        study: 'none',
+      };
+      writeJSON(SETTINGS_KEY, { ...value, chart });
+    }
     return {
       scheme: value.scheme === 'cn' ? 'cn' : 'us',
       theme: value.theme === 'dark' ? 'dark' : 'light',
-      chart: value.chart && typeof value.chart === 'object' ? value.chart : {},
+      chart,
       sidebar: value.sidebar && typeof value.sidebar === 'object' ? value.sidebar : {},
       fundSymbols: Array.isArray(value.fundSymbols) ? value.fundSymbols : [],
     };
@@ -99,12 +114,12 @@ export const store = {
   chartPrefs() {
     const chart = this.settings().chart;
     return {
-      ma: chart.ma !== false,
-      macd: chart.macd !== false,
+      ma: chart.ma === true,
+      macd: chart.macd === true,
       rsi: chart.rsi === true,
       log: chart.log === true,
-      levels: chart.levels !== false,
-      channel: ['none', 'bb', 'kc', 'donchian', 'regression', 'vwap', 'adaptive'].includes(chart.channel) ? chart.channel : 'bb',
+      levels: chart.levels === true,
+      channel: ['none', 'bb', 'kc', 'donchian', 'regression', 'vwap', 'adaptive'].includes(chart.channel) ? chart.channel : 'none',
       trend: ['none', 'supertrend', 'kama'].includes(chart.trend) ? chart.trend : 'none',
       study: ['none', 'adx', 'stochastic', 'cmf', 'obv', 'atr', 'squeeze'].includes(chart.study) ? chart.study : 'none',
     };

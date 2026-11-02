@@ -474,8 +474,8 @@ export function candles(
     .filter((period) => Number.isFinite(period) && period > 0);
   P.ma_periods = periods.length ? periods : indicatorDefaults.ma_periods.slice();
   const prefs = {
-    ma: true, macd: true, rsi: false, levels: true, log: false,
-    channel: 'bb', trend: 'none', study: 'none', ...overlays,
+    ma: false, macd: false, rsi: false, levels: false, log: false,
+    channel: 'none', trend: 'none', study: 'none', ...overlays,
   };
   const up = color('--up', '#34d399');
   const down = color('--down', '#f65c6c');
