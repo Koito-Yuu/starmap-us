@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import mimetypes
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -96,7 +97,12 @@ async def index() -> FileResponse:
 
 @app.get("/api", include_in_schema=False)
 async def api_index() -> dict:
-    return {"service": "starmap-us-terminal", "docs": "/docs", "health": "/api/health"}
+    return {
+        "service": "starmap-us-terminal",
+        "commit": os.getenv("RENDER_GIT_COMMIT", "")[:7],
+        "docs": "/docs",
+        "health": "/api/health",
+    }
 
 
 def main() -> None:
