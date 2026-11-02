@@ -823,16 +823,6 @@ async def index_trends() -> dict[str, list[float]]:
     etf_secids = {"SPX": "107.SPY", "COMP": "107.QQQ", "DJIA": "107.DIA", "IWM": "107.IWM"}
 
     async def factory() -> dict[str, list[float]]:
-        async def one(item: dict[str, Any]) -> tuple[str, list[float]]:
-            try:
-                data = await asyncio.wait_for(trends(item["secid"]), timeout=2.0)
-                return item["symbol"], data["c"][-90:]
-            except Exception as exc:
-                logger.info("trend failed for %s: %s", item["symbol"], exc)
-                return item["symbol"], []
-
-        pairs = dict(await asyncio.gather(*(one(item) for item in INDEX_CARDS)))
-
         async def daily(secid: str) -> list[float]:
             try:
                 payload = await asyncio.wait_for(
@@ -849,7 +839,7 @@ async def index_trends() -> dict[str, list[float]]:
                         },
                         headers=EASTMONEY_HEADERS,
                     ),
-                    timeout=4.0,
+                    timeout=6.0,
                 )
                 lines = ((payload or {}).get("data") or {}).get("klines") or []
                 closes: list[float] = []
@@ -881,12 +871,9 @@ async def index_trends() -> dict[str, list[float]]:
             )
             return item["symbol"], daily_values or proxy_values
 
-        missing = [item for item in INDEX_CARDS if not pairs.get(item["symbol"])]
-        if missing:
-            pairs.update(dict(await asyncio.gather(*(fill(item) for item in missing))))
-        return pairs
+        return dict(await asyncio.gather(*(fill(item) for item in INDEX_CARDS)))
 
-    return await cache.get("index-trends:v6", 120, factory)
+    return await cache.get("index-trends:v7", 120, factory)
 
 
 FALLBACK_DAYS = {
